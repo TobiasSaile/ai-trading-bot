@@ -1,5 +1,5 @@
-import pandas as pd
 import logging
+import pandas as pd
 from models.predictor import predict_signal
 
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
@@ -7,13 +7,15 @@ logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s')
 class PaperTrader:
     def __init__(self, initial_balance=10_000, trading_fee=0.001):
         self.balance = initial_balance
-        self.position = 0
+        self.position = 0  # ETH-Menge
         self.trading_fee = trading_fee
         self.portfolio_value = initial_balance
         self.logs = []
+        self.portfolio_value_series = []
 
     def update_portfolio_value(self, price):
         self.portfolio_value = self.balance + self.position * price
+        self.portfolio_value_series.append(self.portfolio_value)
 
     def buy(self, price, timestamp):
         if self.position == 0:
@@ -21,8 +23,9 @@ class PaperTrader:
             self.position = amount
             self.balance = 0
             self.update_portfolio_value(price)
-            self.logs.append(f"[{timestamp}] BUY @ {price:.2f} | BTC: {self.position:.4f}")
-            logging.info(f"BUY @ {price:.2f} | BTC: {self.position:.4f}")
+            message = f"[{timestamp}] ✅ BUY @ {price:.2f} | ETH: {self.position:.4f}"
+            self.logs.append(message)
+            logging.info(message)
 
     def sell(self, price, timestamp):
         if self.position > 0:
@@ -30,25 +33,32 @@ class PaperTrader:
             self.balance = proceeds
             self.position = 0
             self.update_portfolio_value(price)
-            self.logs.append(f"[{timestamp}] SELL @ {price:.2f} | Balance: {self.balance:.2f}")
-            logging.info(f"SELL @ {price:.2f} | Balance: {self.balance:.2f}")
+            message = f"[{timestamp}] ❌ SELL @ {price:.2f} | Balance: {self.balance:.2f}"
+            self.logs.append(message)
+            logging.info(message)
 
-    def run_with_model(self, df):
-        df.dropna(inplace=True)
+    def run_with_model(self, df: pd.DataFrame):
+        df = df.dropna().copy()
+        self.portfolio_value_series.clear()
+
         for i, row in df.iterrows():
             price = row['close']
-            ts = row['timestamp']
-            signal = predict_signal()
+            timestamp = row['timestamp']
+            signal = predict_signal()  # Klassifikation: BUY, SELL oder HOLD
+
             if signal == "BUY":
-                self.buy(price, ts)
+                self.buy(price, timestamp)
             elif signal == "SELL":
-                self.sell(price, ts)
+                self.sell(price, timestamp)
+            else:
+                self.update_portfolio_value(price)  # Für Equity-Kurve auch bei HOLD
+
+        # Am Ende alles verkaufen (close position)
         if self.position > 0:
             self.sell(df.iloc[-1]['close'], df.iloc[-1]['timestamp'])
-        logging.info(f"📊 Final Portfolio Value (Model): {self.portfolio_value:.2f} USDT")
-        return self.logs, self.portfolio_value
 
-if __name__ == "__main__":
-    df = pd.read_csv("data/btcusdt_1h.csv")
-    trader = PaperTrader()
-    trader.run_with_model(df)
+        summary = f"📊 Final Portfolio Value (Model): {self.portfolio_value:.2f} USDT"
+        self.logs.append(summary)
+        logging.info(summary)
+
+        return self.logs, self.portfolio_value
